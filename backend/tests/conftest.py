@@ -24,5 +24,5 @@ def fake_aws_settings():
     with patch("app.services.aws_cost.settings") as mock_settings:
         mock_settings.aws_access_key_id     = "AKIAIOSFODNN7EXAMPLE"
         mock_settings.aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-        mock_settings.aws_default_region    = "us-east-1"
+        mock_settings.aws_region             = "us-east-1"
         yield mock_settings  # tests that need to modify settings receive this object
