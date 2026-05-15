@@ -1,0 +1,29 @@
+# --- Secrets — never commit these ---
+.env
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- Editor folders ---
+.vscode/
+.idea/
+
+# --- Build artifacts ---
+*.egg-info/
+dist/
+build/
