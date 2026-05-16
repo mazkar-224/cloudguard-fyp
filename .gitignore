@@ -27,3 +27,7 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+
+# --- Test / coverage artifacts ---
+.coverage
+htmlcov/
