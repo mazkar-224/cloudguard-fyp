@@ -1,0 +1,55 @@
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16
+    restart: unless-stopped
+
+    # ${VAR} values are substituted from the root .env file automatically.
+    # Docker Compose looks for .env in the same folder as this file.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    ports:
+      # host:container — so your app at localhost:5432 reaches the container
+      - "5433:5432"
+
+    volumes:
+      # Named volume keeps data when the container restarts.
+      # Without this, every `docker compose down` wipes the database.
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      # pg_isready exits 0 when PostgreSQL is accepting connections.
+      # Docker marks the service "healthy" only after this passes —
+      # pgadmin (below) waits for this before starting.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── pgAdmin ─────────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+
+    ports:
+      # Visit http://localhost:5050 to open the pgAdmin web UI
+      - "5050:80"
+
+    depends_on:
+      db:
+        # pgadmin won't start until postgres passes its healthcheck.
+        # Prevents "connection refused" errors on first boot.
+        condition: service_healthy
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    # Docker manages this — no need to create it manually.

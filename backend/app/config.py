@@ -15,11 +15,13 @@ class Settings(BaseSettings):
     # AWS
     aws_access_key_id: str
     aws_secret_access_key: str
-    aws_default_region: str = "us-east-1"  # default to us-east-1 if not set
+    aws_region: str = "us-east-1"  # which AWS region to use by default
 
     # App
     secret_key: str
     debug: bool = False
+    environment: str = "development"  # development | staging | production
+    log_level: str = "INFO"           # DEBUG | INFO | WARNING | ERROR
 
     # SettingsConfigDict is the modern Pydantic v2 way to configure settings
     # (replaces the old inner `class Config` pattern)

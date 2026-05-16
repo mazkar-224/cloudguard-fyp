@@ -1,0 +1,15 @@
+[run]
+source = app
+omit =
+    # Empty __init__ files — no logic to test
+    app/routers/__init__.py
+    app/schemas/__init__.py
+    app/db/__init__.py
+    app/models/__init__.py
+    app/jobs/__init__.py
+    app/api/__init__.py
+    app/__init__.py
+
+[report]
+show_missing = true
+skip_empty = true

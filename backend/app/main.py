@@ -1,35 +1,106 @@
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Create the FastAPI application instance.
-# `title` and `version` show up in the auto-generated API docs at /docs
+from app.api.v1 import v1_router
+from app.api.v1.health import APP_VERSION
+from app.jobs.cost_sync import run_sync_job
+
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan replaces the old @app.on_event("startup") / ("shutdown") pattern.
+    Everything before `yield` runs on startup; everything after runs on shutdown.
+
+    Why lifespan instead of on_event?
+      FastAPI deprecated on_event. Lifespan is the modern, recommended way
+      and it handles errors more cleanly (shutdown still runs even if startup fails).
+    """
+    scheduler.add_job(
+        run_sync_job,
+        trigger="interval",
+        hours=6,
+        id="cost_sync",
+        replace_existing=True,
+    )
+    scheduler.start()
+
+    yield
+
+    scheduler.shutdown(wait=False)
+
+
 app = FastAPI(
     title="CloudGuard API",
-    version="0.1.0",
-    description="AWS cost monitoring and anomaly detection",
+    version=APP_VERSION,
+    description="""
+## CloudGuard — AWS Cost Monitoring & Anomaly Detection
+
+CloudGuard gives you a real-time view of your AWS spending without opening
+the AWS Console. It pulls data from **AWS Cost Explorer**, stores it in
+PostgreSQL, and serves it through this API to a React dashboard.
+
+### How data flows
+1. Every **6 hours** APScheduler calls `POST /api/v1/admin/sync` internally.
+2. The sync job fetches the last 7 days from AWS and **upserts** them into
+   the `cost_records` table — re-running is safe, no duplicates are created.
+3. Cost endpoints read from **PostgreSQL first** (fast, free).
+   If the database is empty they fall back to a **live AWS call** automatically.
+
+### Running a live demo
+Hit `POST /api/v1/admin/sync` in Swagger UI, then refresh your dashboard charts.
+The `rows_upserted` and `duration_seconds` fields in the response confirm the sync worked.
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| 400  | Invalid or missing AWS credentials |
+| 403  | IAM policy missing `ce:GetCostAndUsage` permission |
+| 422  | Bad query parameter (e.g. `days=0`) |
+| 502  | Unexpected AWS error — check CloudWatch or retry |
+""",
+    contact={
+        "name": "Muhammad Azkar",
+        "email": "mgtstore29@gmail.com",
+    },
+    license_info={"name": "MIT"},
+    openapi_tags=[
+        {
+            "name": "health",
+            "description": "Liveness check — confirms the API is reachable and returns the current version.",
+        },
+        {
+            "name": "costs",
+            "description": (
+                "AWS cost data. Reads from PostgreSQL when available, "
+                "falls back to a live AWS Cost Explorer call when the DB is empty."
+            ),
+        },
+        {
+            "name": "admin",
+            "description": (
+                "Operational endpoints. Trigger an on-demand sync or verify "
+                "that credentials and IAM permissions are working."
+            ),
+        },
+    ],
+    lifespan=lifespan,
 )
 
-# CORS (Cross-Origin Resource Sharing) lets the React frontend
-# (running on localhost:5173) talk to this backend (localhost:8000).
-# Without this, the browser blocks the requests.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React dev server address
+    allow_origins=[
+        "http://localhost:3000",  # Create React App
+        "http://localhost:5173",  # Vite
+    ],
     allow_credentials=True,
-    allow_methods=["*"],   # allow GET, POST, PUT, DELETE, etc.
-    allow_headers=["*"],   # allow any headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
-# --- Routes will be registered here as we build them ---
-# Example: app.include_router(auth_router, prefix="/api/auth")
-
-
-@app.get("/health")
-def health_check():
-    """
-    A simple endpoint to confirm the server is running.
-    Call GET /health and you should get {"status": "ok"} back.
-    Useful for Docker health checks and load balancer pings.
-    """
-    return {"status": "ok", "app": "CloudGuard"}
+app.include_router(v1_router, prefix="/api/v1")

@@ -1,3 +1,6 @@
-# SQLAlchemy ORM models go here.
-# Each file in this folder represents a database table.
-# Example: user.py will define the `users` table.
+# Import all models here so Alembic can find them when it scans Base.metadata.
+# If a model file is not imported here, Alembic won't see its table and
+# won't include it in auto-generated migrations.
+from app.models.cost import AwsAccount, CostRecord
+
+__all__ = ["AwsAccount", "CostRecord"]
