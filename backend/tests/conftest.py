@@ -82,11 +82,10 @@ def reset_tables():
     """
     Truncates all test-DB tables after every test so state never bleeds over.
 
-    Why a fresh NullPool engine?
-      asyncpg connections are bound to the event loop they were created in.
-      After a test's anyio loop closes, the pool in `test_engine` holds stale
-      connections. Using NullPool creates a brand-new connection in a fresh
-      asyncio.run() loop — no cross-loop reuse, no "operation in progress" error.
+    Why a local engine inside asyncio.run()?
+      asyncio.run() creates its own event loop. asyncpg requires that every
+      connection is created in the loop that uses it. A local NullPool engine
+      creates one fresh connection inside that loop — clean, no cross-loop sharing.
     """
     yield  # test runs here
 

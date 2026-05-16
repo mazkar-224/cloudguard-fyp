@@ -1,12 +1,7 @@
 [run]
 source = app
 omit =
-    # Old module kept for reference — replaced by AwsCostService
-    app/services/aws_cost.py
-    # Terminal display helper — only used by the old debug script
-    app/utils/display.py
-    app/utils/__init__.py
-    # Empty placeholder folders
+    # Empty __init__ files — no logic to test
     app/routers/__init__.py
     app/schemas/__init__.py
     app/db/__init__.py

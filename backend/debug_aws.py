@@ -127,7 +127,7 @@ elif total_cost == 0 and len(days) > 0:
 
 else:
     print(f"  Data looks fine — ${total_cost:.2f} in spending found.")
-    print("  The display function filters out $0.00 rows.")
-    print("  If all your costs round to $0.00, try this fix in aws_cost.py:")
-    print("  Change:  if cost == 0.0: continue")
-    print("  To:      if cost < 0.001: continue")
+    print("  The service filters out exact $0.00 rows.")
+    print("  If all your costs round to $0.00, try this fix in aws_cost_service.py:")
+    print("  Change:  if cost_amount == 0.0: continue")
+    print("  To:      if cost_amount < 0.001: continue")
