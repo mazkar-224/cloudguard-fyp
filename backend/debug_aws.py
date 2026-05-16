@@ -27,7 +27,7 @@ if settings.aws_secret_access_key == placeholder_secret:
     exit(1)
 
 print(f"  Access Key ID : {settings.aws_access_key_id[:8]}... (loaded)")
-print(f"  Region        : {settings.aws_default_region}")
+print(f"  Region        : {settings.aws_region}")
 print()
 
 print("=" * 60)

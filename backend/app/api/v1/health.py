@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["health"])
 
 # APP_VERSION is the single source of truth for the version string.
 # It appears in /health responses and in the Swagger docs title.
