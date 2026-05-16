@@ -160,7 +160,7 @@ class AwsCostService:
 
                 results.append({
                     "date": date_str,
-                    "cost": round(cost_amount, 2),
+                    "cost": cost_amount,   # full precision — round at the API boundary
                     "service": service_name,
                 })
         return results

@@ -72,7 +72,10 @@ async def get_daily_costs(
     except Exception as exc:
         raise _to_http_error(exc) from exc
 
-    return [DailyCostItem(**item) for item in live]
+    return [
+        DailyCostItem(date=item["date"], service=item["service"], cost=round(item["cost"], 2))
+        for item in live
+    ]
 
 
 # ── Endpoint 2: cost by service ───────────────────────────────────────────────
@@ -165,7 +168,7 @@ async def get_cost_summary(
     )
     agg = agg_result.one()
 
-    if agg.total:
+    if agg.count:
         # Second query: find which service cost the most.
         top_result = await db.execute(
             select(

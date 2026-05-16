@@ -4,6 +4,47 @@ AWS cost monitoring and anomaly detection — FastAPI + PostgreSQL + React (Tail
 
 ---
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         React Dashboard                         │
+│              (Phase 3 — charts, Tailwind, Vite)                 │
+└────────────────────────────┬────────────────────────────────────┘
+                             │  HTTP  (localhost:3000 → 8000)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      FastAPI  /api/v1/                          │
+│                                                                 │
+│   GET  /health          GET  /costs/daily                       │
+│   GET  /costs/summary   GET  /costs/by-service                  │
+│   POST /admin/sync      ← manual trigger                        │
+│                                                                 │
+│   APScheduler ──► run_sync_job()  every 6 hours                 │
+│         │                   │                                   │
+│         ▼                   ▼                                   │
+│   AwsCostService      sync_cost_data()                          │
+│   (boto3 wrapper)     upsert → cost_records                     │
+└──────────┬───────────────────────┬──────────────────────────────┘
+           │  asyncio.to_thread    │  SQLAlchemy async (asyncpg)
+           ▼                       ▼
+┌──────────────────┐   ┌───────────────────────────────┐
+│   AWS Cost       │   │   PostgreSQL  (port 5433)     │
+│   Explorer API   │   │                               │
+│                  │   │   aws_accounts                │
+│   STS (account   │   │   cost_records                │
+│   ID lookup)     │   │     ├─ date                   │
+│                  │   │     ├─ service_name            │
+└──────────────────┘   │     └─ amount_usd Numeric(12,4)│
+                       └───────────────────────────────┘
+```
+
+**Data flow:** Every 6 hours (or on `POST /admin/sync`) the sync job calls AWS Cost Explorer,
+upserts the last 7 days into PostgreSQL, and returns. All dashboard reads hit PostgreSQL first —
+AWS is only called when the database is empty.
+
+---
+
 ## What it does
 
 - Pulls the last 7 days of AWS spending from **Cost Explorer** every 6 hours
