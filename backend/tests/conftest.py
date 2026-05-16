@@ -127,13 +127,24 @@ async def client(db_session: AsyncSession) -> AsyncClient:
     AsyncClient that calls FastAPI endpoints in-process.
 
     get_db is overridden so every route uses the test session.
-    AWS service is NOT overridden — cost endpoint tests seed the DB
-    directly, so the DB path is taken and AWS is never called.
+    get_aws_service is also overridden with a mock that raises if called —
+    these tests seed the DB so the AWS fallback should never be triggered.
+    The override also removes the need for real credentials in .env.
     """
     async def _override_db():
         yield db_session
 
+    # Raise loudly if any test accidentally hits the AWS fallback path.
+    _no_aws = MagicMock(spec=AwsCostService)
+    _no_aws.get_daily_costs = AsyncMock(
+        side_effect=AssertionError("DB path should have been taken — AWS called unexpectedly")
+    )
+    _no_aws.get_cost_by_service = AsyncMock(
+        side_effect=AssertionError("DB path should have been taken — AWS called unexpectedly")
+    )
+
     fastapi_app.dependency_overrides[get_db] = _override_db
+    fastapi_app.dependency_overrides[get_aws_service] = lambda: _no_aws
 
     async with AsyncClient(
         transport=ASGITransport(app=fastapi_app),
@@ -142,6 +153,7 @@ async def client(db_session: AsyncSession) -> AsyncClient:
         yield ac
 
     fastapi_app.dependency_overrides.pop(get_db, None)
+    fastapi_app.dependency_overrides.pop(get_aws_service, None)
 
 
 # ── Mock AWS service + patched STS ────────────────────────────────────────────

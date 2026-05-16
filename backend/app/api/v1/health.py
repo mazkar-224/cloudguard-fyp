@@ -6,7 +6,7 @@ router = APIRouter(tags=["health"])
 
 # APP_VERSION is the single source of truth for the version string.
 # It appears in /health responses and in the Swagger docs title.
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 
 @router.get("/health")

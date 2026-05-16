@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import v1_router
+from app.api.v1.health import APP_VERSION
 from app.jobs.cost_sync import run_sync_job
 
 scheduler = AsyncIOScheduler()
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CloudGuard API",
-    version="0.2.0",
+    version=APP_VERSION,
     description="""
 ## CloudGuard — AWS Cost Monitoring & Anomaly Detection
 
