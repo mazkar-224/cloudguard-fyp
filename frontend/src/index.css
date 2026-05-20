@@ -1,0 +1,39 @@
+/* Tailwind v4 — single import replaces the old three @tailwind directives */
+@import "tailwindcss";
+
+/*
+  Switch Tailwind's built-in `dark:` variant from media-query strategy
+  to class strategy. When the `dark` class is on <html>, every element
+  on the page matches `dark:*` utilities.
+
+  The FOUC-prevention script in index.html applies this class synchronously
+  before React boots, so there is no light→dark flash on page load.
+*/
+@variant dark (&:where(.dark, .dark *));
+
+/*
+  @theme extends Tailwind's palette with semantic tokens.
+  These become real Tailwind utility classes: bg-accent, text-success, etc.
+*/
+@theme {
+  /* Accent blue — the one interactive colour used for buttons and links */
+  --color-accent:       #3b82f6;   /* = blue-500  */
+  --color-accent-dark:  #2563eb;   /* = blue-600, used for hover states */
+
+  /* Semantic colours — give meaning to green / red / amber */
+  --color-success:  #22c55e;   /* healthy, synced, positive delta  */
+  --color-danger:   #ef4444;   /* error, over-budget, failed sync  */
+  --color-warning:  #f59e0b;   /* approaching budget, degraded     */
+}
+
+/*
+  Chart CSS variables — Recharts SVG props (stroke, fill) can't use
+  Tailwind dark: classes, so we pass CSS variables instead and swap
+  them here when .dark is active.
+*/
+:root {
+  --chart-grid-color: #f0f0f0;
+}
+.dark {
+  --chart-grid-color: #374151;   /* gray-700 */
+}
