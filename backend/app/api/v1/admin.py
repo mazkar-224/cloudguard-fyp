@@ -14,6 +14,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class SyncResult(BaseModel):
     rows_upserted: int
+    new_alerts_created: int
     duration_seconds: float
 
 
@@ -34,7 +35,7 @@ async def manual_sync(
     start = time.perf_counter()
 
     try:
-        rows = await sync_cost_data(db, aws)
+        summary = await sync_cost_data(db, aws)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
@@ -43,6 +44,7 @@ async def manual_sync(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return SyncResult(
-        rows_upserted=rows,
+        rows_upserted=summary.cost_rows_upserted,
+        new_alerts_created=summary.new_alerts_created,
         duration_seconds=round(time.perf_counter() - start, 3),
     )

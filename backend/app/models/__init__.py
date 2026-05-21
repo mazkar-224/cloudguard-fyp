@@ -2,5 +2,6 @@
 # If a model file is not imported here, Alembic won't see its table and
 # won't include it in auto-generated migrations.
 from app.models.cost import AwsAccount, CostRecord
+from app.models.alert import Alert
 
-__all__ = ["AwsAccount", "CostRecord"]
+__all__ = ["AwsAccount", "CostRecord", "Alert"]
