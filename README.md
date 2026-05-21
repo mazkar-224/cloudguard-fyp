@@ -270,9 +270,24 @@ cloudguard/
 
 ## Phase roadmap
 
-- [x] **Phase 1** — Project setup (Docker, git, folder structure)
-- [x] **Phase 2** — Backend API (FastAPI, PostgreSQL, AWS integration, 28 tests)
-- [x] **Phase 3** — React dashboard (Recharts charts, Tailwind v4, dark mode, toast notifications)
+- [x] **Phase 1** — Project setup
+  - Docker Compose with PostgreSQL 16 + pgAdmin
+  - FastAPI app skeleton with CORS, settings via Pydantic
+  - Alembic migration creating `aws_accounts` + `cost_records` tables
+- [x] **Phase 2** — Backend API (28 tests passing)
+  - `AwsCostService` boto3 wrapper around Cost Explorer with async-safe `asyncio.to_thread()`
+  - 5 REST endpoints: `/health`, `/costs/daily`, `/costs/by-service`, `/costs/summary`, `/admin/sync`
+  - APScheduler background job — every 6 hours, upserts via PostgreSQL `ON CONFLICT DO UPDATE`
+  - STS account-ID lookup with graceful fallback when blocked
+  - `Numeric(12,4)` for money (exact decimal precision, rounded only at API boundary)
+- [x] **Phase 3** — React dashboard
+  - **3.1** Vite + Tailwind v4 (CSS-first `@theme`) scaffold, ESLint, Prettier, `/api` proxy
+  - **3.2** Axios + TanStack React Query v5 with global error handler, devtools panel
+  - **3.3** App shell — sticky header + sidebar, React Router nested routes, `lucide-react` icons
+  - **3.4** 4 summary cards (30d / 7d / yesterday / week-over-week %) with skeleton + error states
+  - **3.5** Daily costs line chart (7d/30d/90d selector) + service breakdown donut (top 5 + Other)
+  - **3.6** Dark mode toggle with FOUC prevention, `sonner` toasts, empty state, React error boundary
+  - **3.7** `useSync` mutation, one-command startup scripts (`dev.sh` / `dev.bat`), demo screenshots
 - [ ] **Phase 4** — Anomaly detection *(in progress)*
   - [x] **4.1** — Pure z-score detection algorithm with severity bands + 7 unit tests
   - [x] **4.2** — `alerts` database table with `NULLS NOT DISTINCT` unique constraint
