@@ -42,7 +42,8 @@ This is a final-year capstone project (BSCS). The goal is a fully functional, se
 │         │                   │                                   │
 │         ▼                   ▼                                   │
 │   AwsCostService      sync_cost_data()                          │
-│   (boto3 wrapper)     upsert → cost_records                     │
+│   (boto3 wrapper)     1. upsert → cost_records                  │
+│                       2. detect_anomalies() → alerts            │
 └──────────┬───────────────────────┬──────────────────────────────┘
            │  asyncio.to_thread    │  SQLAlchemy async (asyncpg)
            ▼                       ▼
@@ -51,13 +52,14 @@ This is a final-year capstone project (BSCS). The goal is a fully functional, se
 │   Explorer API   │   │                               │
 │                  │   │   aws_accounts                │
 │   STS (account   │   │   cost_records                │
-│   ID lookup)     │   │     ├─ date                   │
-│                  │   │     ├─ service_name            │
-└──────────────────┘   │     └─ amount_usd Numeric(12,4)│
+│   ID lookup)     │   │   alerts  ← Phase 4           │
+│                  │   │     ├─ scope (total/service)  │
+│                  │   │     ├─ z_score, severity      │
+└──────────────────┘   │     └─ status, notified       │
                        └───────────────────────────────┘
 ```
 
-**Data flow:** Every 6 hours (or on `POST /admin/sync`) the sync job calls AWS Cost Explorer, upserts the last 7 days into PostgreSQL, and returns. All dashboard reads hit PostgreSQL first — AWS is only called when the database is empty.
+**Data flow:** Every 6 hours (or on `POST /admin/sync`) the sync job calls AWS Cost Explorer, upserts the last 7 days into PostgreSQL, then runs anomaly detection on the trailing 21 days — flagging account-level spikes (`scope='total'`) and per-service spikes (`scope='service'`) using a z-score against a 14-day rolling mean. Detected anomalies persist as `alerts` rows. All dashboard reads hit PostgreSQL first — AWS is only called when the database is empty.
 
 ---
 
@@ -197,7 +199,7 @@ All three read from PostgreSQL first. If the database is empty they fall back to
 POST /api/v1/admin/sync
 ```
 
-Triggers an immediate sync from AWS Cost Explorer. Use during a demo to populate the database and see the dashboard update live. Returns `{ rows_upserted, duration_seconds }`.
+Triggers an immediate sync from AWS Cost Explorer, then runs anomaly detection on the trailing 21 days. Use during a demo to populate the database and see the dashboard update live. Returns `{ rows_upserted, new_alerts_created, duration_seconds }`.
 
 Full interactive docs: **http://localhost:8000/docs**
 
@@ -217,7 +219,7 @@ venv/bin/python3 -m pytest tests/ -v
 venv/bin/python3 -m pytest --cov=app --cov-report=term-missing tests/
 ```
 
-Current coverage: **72%** (threshold: 70%)
+Current test count: **37 tests** (was 28 in Phase 3, +9 from Phase 4)
 
 | File | What it tests |
 |------|--------------|
@@ -225,6 +227,8 @@ Current coverage: **72%** (threshold: 70%)
 | `test_costs.py` | All three cost endpoints with seeded DB data |
 | `test_admin_sync.py` | Sync endpoint — 200, correct count, idempotency |
 | `test_aws_cost.py` | `AwsCostService` unit tests — error handling, parsing |
+| `test_anomaly_detector.py` | Pure z-score algorithm — spike, normal, zero variance, severity bands, dollar floor, empty input |
+| `test_cost_sync.py` | End-to-end: seeded baseline + spike → exactly one Alert; second sync is idempotent |
 
 ---
 
@@ -249,14 +253,14 @@ cloudguard/
 │   ├── app/
 │   │   ├── api/v1/          # Route handlers (health, costs, admin)
 │   │   ├── db/              # SQLAlchemy engine + session
-│   │   ├── jobs/            # APScheduler background sync
-│   │   ├── models/          # ORM models (AwsAccount, CostRecord)
+│   │   ├── jobs/            # APScheduler background sync + detection
+│   │   ├── models/          # ORM models (AwsAccount, CostRecord, Alert)
 │   │   ├── schemas/         # Pydantic response models
-│   │   ├── services/        # AwsCostService (wraps boto3)
+│   │   ├── services/        # AwsCostService, anomaly_detector
 │   │   ├── config.py        # Settings loaded from .env
 │   │   └── main.py          # FastAPI app + lifespan
 │   ├── alembic/             # Database migrations
-│   ├── tests/               # Pytest test suite (28 tests)
+│   ├── tests/               # Pytest test suite (37 tests)
 │   ├── requirements.txt
 │   └── .env                 # Local secrets (gitignored)
 └── docker-compose.yml
@@ -266,8 +270,29 @@ cloudguard/
 
 ## Phase roadmap
 
-- [x] **Phase 1** — Project setup (Docker, git, folder structure)
-- [x] **Phase 2** — Backend API (FastAPI, PostgreSQL, AWS integration, 28 tests)
-- [x] **Phase 3** — React dashboard (Recharts charts, Tailwind v4, dark mode, toast notifications)
-- [ ] **Phase 4** — Anomaly detection
+- [x] **Phase 1** — Project setup
+  - Docker Compose with PostgreSQL 16 + pgAdmin
+  - FastAPI app skeleton with CORS, settings via Pydantic
+  - Alembic migration creating `aws_accounts` + `cost_records` tables
+- [x] **Phase 2** — Backend API (28 tests passing)
+  - `AwsCostService` boto3 wrapper around Cost Explorer with async-safe `asyncio.to_thread()`
+  - 5 REST endpoints: `/health`, `/costs/daily`, `/costs/by-service`, `/costs/summary`, `/admin/sync`
+  - APScheduler background job — every 6 hours, upserts via PostgreSQL `ON CONFLICT DO UPDATE`
+  - STS account-ID lookup with graceful fallback when blocked
+  - `Numeric(12,4)` for money (exact decimal precision, rounded only at API boundary)
+- [x] **Phase 3** — React dashboard
+  - **3.1** Vite + Tailwind v4 (CSS-first `@theme`) scaffold, ESLint, Prettier, `/api` proxy
+  - **3.2** Axios + TanStack React Query v5 with global error handler, devtools panel
+  - **3.3** App shell — sticky header + sidebar, React Router nested routes, `lucide-react` icons
+  - **3.4** 4 summary cards (30d / 7d / yesterday / week-over-week %) with skeleton + error states
+  - **3.5** Daily costs line chart (7d/30d/90d selector) + service breakdown donut (top 5 + Other)
+  - **3.6** Dark mode toggle with FOUC prevention, `sonner` toasts, empty state, React error boundary
+  - **3.7** `useSync` mutation, one-command startup scripts (`dev.sh` / `dev.bat`), demo screenshots
+- [ ] **Phase 4** — Anomaly detection *(in progress)*
+  - [x] **4.1** — Pure z-score detection algorithm with severity bands + 7 unit tests
+  - [x] **4.2** — `alerts` database table with `NULLS NOT DISTINCT` unique constraint
+  - [x] **4.3** — Detection wired into sync (total + per-service top 5), idempotent inserts
+  - [ ] **4.4** — Alerts API (`GET /alerts`, `POST /alerts/{id}/acknowledge`)
+  - [ ] **4.5** — SendGrid email notifications
+  - [ ] **4.6** — Alerts UI page (replace placeholder)
 - [ ] **Phase 5** — Deployment (Docker, CI/CD)
