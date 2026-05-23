@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, Bell, Settings } from 'lucide-react'
 
+import { useAlertCounts } from '../hooks/useAlertCounts'
+
 const NAV_ITEMS = [
   { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
   { to: '/alerts',   label: 'Alerts',    icon: Bell },
@@ -8,6 +10,9 @@ const NAV_ITEMS = [
 ]
 
 function Sidebar() {
+  const { data: counts } = useAlertCounts()
+  const newCount = counts?.by_status?.new ?? 0
+
   return (
     <aside className="w-60 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 sticky top-14 h-[calc(100vh-3.5rem)] flex flex-col">
 
@@ -34,6 +39,11 @@ function Sidebar() {
           >
             <Icon size={16} strokeWidth={1.75} />
             {label}
+            {to === '/alerts' && newCount > 0 && (
+              <span className="ml-auto inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-semibold rounded-full bg-danger text-white">
+                {newCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

@@ -31,3 +31,7 @@ build/
 # --- Test / coverage artifacts ---
 .coverage
 htmlcov/
+
+# --- Local Claude Code config / third-party skills (not part of the project) ---
+.claude/skills/
+.claude/settings.local.json

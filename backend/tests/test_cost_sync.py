@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import func, select
 
-from app.jobs.cost_sync import sync_cost_data
+from app.jobs.cost_sync import Z_SCORE_DB_MAX, sync_cost_data
 from app.models.alert import Alert
 from app.models.cost import AwsAccount, CostRecord
 from app.services.aws_cost_service import AwsCostService
@@ -129,3 +129,62 @@ async def test_sync_detection_idempotent(db_session):
         select(func.count()).select_from(Alert)
     )
     assert total_alerts == first.new_alerts_created
+
+
+# ── Test 3: extreme z-score is clamped, not overflowed ────────────────────────
+
+async def _seed_flat_baseline(db_session, account_id_str: str):
+    """
+    20 near-identical days. amount_usd is Numeric(12,4), so the smallest
+    representable difference is $0.0001 → a tiny but non-zero std (~5e-5).
+    A large spike against that std yields a z-score in the millions, which
+    would overflow the Numeric(8,2) z_score column if it weren't clamped.
+    """
+    today = date.today()
+    account = AwsAccount(account_id=account_id_str)
+    db_session.add(account)
+    await db_session.flush()
+
+    for i in range(20):
+        day = today - timedelta(days=21 - i)
+        amount = Decimal("5.0000") if i % 2 == 0 else Decimal("5.0001")
+        db_session.add(CostRecord(
+            aws_account_id=account.id,
+            date=day,
+            service_name="Amazon EC2",
+            amount_usd=amount,
+        ))
+    await db_session.commit()
+    return account
+
+
+def _spike_aws_mock_amount(amount: float):
+    spike_date = str(date.today() - timedelta(days=1))
+    mock = MagicMock(spec=AwsCostService)
+    mock.get_daily_costs = AsyncMock(return_value=[
+        {"date": spike_date, "service": "Amazon EC2", "cost": amount},
+    ])
+    return mock
+
+
+@pytest.mark.anyio
+async def test_extreme_zscore_is_clamped_not_overflowed(db_session):
+    """
+    A near-flat baseline + a $100 spike gives z ≈ 1.9M. Without clamping, the
+    insert into Numeric(8,2) raises 'numeric field overflow' and the sync dies.
+    The clamp must cap z at the column ceiling so the alert saves cleanly.
+    """
+    await _seed_flat_baseline(db_session, "888888888888")
+    mock_aws = _spike_aws_mock_amount(100.00)
+
+    with patch("app.jobs.cost_sync._fetch_account_id_sync", return_value="888888888888"):
+        # Must NOT raise a numeric-overflow error.
+        summary = await sync_cost_data(db_session, mock_aws)
+
+    assert summary.new_alerts_created >= 1
+
+    alert = (await db_session.execute(
+        select(Alert).where(Alert.scope == "total")
+    )).scalar_one()
+    assert float(alert.z_score) == pytest.approx(Z_SCORE_DB_MAX)  # clamped to ceiling
+    assert alert.severity == "high"

@@ -37,6 +37,19 @@ def anyio_backend(request):
     return request.param
 
 
+# ── Isolate SendGrid settings ─────────────────────────────────────────────────
+# Real .env may contain a working SendGrid key + sender + recipient.  Without
+# this fixture, sync tests would attempt actual network sends.  Individual
+# tests that want to exercise the email path can opt in with their own
+# monkeypatch (overrides our empty defaults for the duration of the test).
+
+@pytest.fixture(autouse=True)
+def _clear_sendgrid_settings(monkeypatch):
+    monkeypatch.setattr("app.config.settings.sendgrid_api_key", "")
+    monkeypatch.setattr("app.config.settings.alert_sender_email", "")
+    monkeypatch.setattr("app.config.settings.alert_recipient_email", "")
+
+
 # ── Test database ─────────────────────────────────────────────────────────────
 
 TEST_DB_URL = (
