@@ -231,7 +231,7 @@ venv/bin/python3 -m pytest tests/ -v
 venv/bin/python3 -m pytest --cov=app --cov-report=term-missing tests/
 ```
 
-Current test count: **52 tests** (28 in Phase 3, +24 across Phase 4)
+Current test count: **85 tests** (28 in Phase 3, +24 across Phase 4, +33 across Phase 5)
 
 | File | What it tests |
 |------|--------------|
@@ -244,6 +244,10 @@ Current test count: **52 tests** (28 in Phase 3, +24 across Phase 4)
 | `test_email_service.py` | SendGrid alert email — payload, HTML escaping, config-missing + failure handling (mocked) |
 | `test_alerts_api.py` | `/alerts` list filters + pagination, `/alerts/count` grouping + days window, `PATCH` acknowledge + 404 |
 | `test_e2e_spike_to_alert.py` | Full pipeline: spike → detection → alert → email sent → visible via API (AWS + SendGrid mocked) |
+| `test_resource_scanner.py` | `ResourceScanner` — credential/region validation, healthcheck, four metadata finders + idle-CPU check (moto + mocked CloudWatch) |
+| `test_savings_estimator.py` | Offline savings estimator — per-type pricing math, unknown type → $0, missing size doesn't crash |
+| `test_resource_scan.py` | Scan job — findings become priced recommendations; re-run is idempotent (updates, no duplicates); endpoint counts |
+| `test_recommendations_api.py` | `/recommendations` list filters + dollar-desc sort, summary totals, dismiss/resolve, 404 + 422 |
 
 ---
 
@@ -277,7 +281,7 @@ cloudguard/
 │   │   └── main.py          # FastAPI app + lifespan
 │   ├── alembic/             # Database migrations
 │   ├── scripts/             # inject_spike.py — synthetic spike for live demos
-│   ├── tests/               # Pytest test suite (52 tests)
+│   ├── tests/               # Pytest test suite (85 tests)
 │   ├── requirements.txt
 │   └── .env                 # Local secrets (gitignored)
 └── docker-compose.yml
@@ -313,4 +317,12 @@ cloudguard/
   - **4.5** Alerts API — `GET /alerts` (status/severity filters, days window, pagination), `GET /alerts/count`, `PATCH /alerts/{id}`
   - **4.6** Alerts UI page — filterable list, severity badges, acknowledge mutation, sidebar new-alert count badge
   - **4.7** Demo readiness — `inject_spike.py` synthetic-spike injector, end-to-end pipeline test, `docs/anomaly-detection.md`
-- [ ] **Phase 5** — Deployment (Docker, CI/CD)
+- [x] **Phase 5** — Resource waste scanner & recommendations (85 tests passing)
+  - **5.1** `ResourceScanner` (EC2 + CloudWatch) sibling to `AwsCostService`, async `healthcheck()` returning `{ok, detail}`, moto-based tests
+  - **5.2** Four metadata waste finders (unattached EBS, unassociated Elastic IP, stopped EC2, old snapshots) + resilient `scan_all()`
+  - **5.3** Offline savings estimator — documented approximate pricing table → `{estimated_monthly_usd, basis}` (stopped instance = EBS-only, no compute)
+  - **5.4** `find_idle_running_instances()` — CloudWatch CPUUtilization 14-day average < 5%, skips no-data instances (no false positives)
+  - **5.5** `Recommendation` model + migration, daily `scan_resources()` job with idempotent `ON CONFLICT DO UPDATE` (first/last-seen), `POST /admin/scan-resources`
+  - **5.6** Recommendations API — `GET /recommendations` (filters + dollar-descending sort + pagination), `GET /recommendations/summary`, `PATCH /recommendations/{id}`
+  - **5.7** Recommendations UI — savings hero banner, filters, dollar-ranked cards (savings labeled approximate) with dismiss/resolve, "Scan now" button
+- [ ] **Phase 6** — Deployment & final stage (Docker, CI/CD)
