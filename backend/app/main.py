@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import v1_router
 from app.api.v1.health import APP_VERSION
 from app.jobs.cost_sync import run_sync_job
+from app.jobs.resource_scan import run_scan_job
 
 scheduler = AsyncIOScheduler()
 
@@ -26,6 +27,14 @@ async def lifespan(app: FastAPI):
         trigger="interval",
         hours=6,
         id="cost_sync",
+        replace_existing=True,
+    )
+    # Resource scans are heavier and change slowly, so daily is plenty.
+    scheduler.add_job(
+        run_scan_job,
+        trigger="interval",
+        hours=24,
+        id="resource_scan",
         replace_existing=True,
     )
     scheduler.start()

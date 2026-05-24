@@ -63,3 +63,29 @@ export function fetchAlertCounts(days = 30) {
 export function acknowledgeAlert(id) {
   return api.patch(`/alerts/${id}`).then(r => r.data)
 }
+
+// GET /recommendations — list cost-saving recommendations, sorted by savings.
+// 'all'/empty filters are omitted so the backend applies its defaults.
+export function fetchRecommendations({ resourceType, status = 'open', limit = 100, offset = 0 } = {}) {
+  const params = new URLSearchParams()
+  if (resourceType && resourceType !== 'all') params.set('resource_type', resourceType)
+  if (status) params.set('status', status)
+  params.set('limit', limit)
+  params.set('offset', offset)
+  return api.get(`/recommendations?${params.toString()}`).then(r => r.data)
+}
+
+// GET /recommendations/summary — total monthly savings + open count + breakdown
+export function fetchRecommendationsSummary() {
+  return api.get('/recommendations/summary').then(r => r.data)
+}
+
+// PATCH /recommendations/{id} — set status to 'dismissed' or 'resolved'
+export function updateRecommendation(id, status) {
+  return api.patch(`/recommendations/${id}`, { status }).then(r => r.data)
+}
+
+// POST /admin/scan-resources — trigger a live AWS resource scan
+export function triggerResourceScan() {
+  return api.post('/admin/scan-resources').then(r => r.data)
+}

@@ -107,7 +107,7 @@ def reset_tables():
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "TRUNCATE TABLE cost_records, aws_accounts"
+                    "TRUNCATE TABLE recommendations, cost_records, aws_accounts"
                     " RESTART IDENTITY CASCADE"
                 )
             )

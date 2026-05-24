@@ -3,5 +3,6 @@
 # won't include it in auto-generated migrations.
 from app.models.cost import AwsAccount, CostRecord
 from app.models.alert import Alert
+from app.models.recommendation import Recommendation
 
-__all__ = ["AwsAccount", "CostRecord", "Alert"]
+__all__ = ["AwsAccount", "CostRecord", "Alert", "Recommendation"]

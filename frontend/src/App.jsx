@@ -3,6 +3,7 @@ import { Toaster } from 'sonner'
 import Layout from './components/Layout'
 import DashboardPage from './pages/DashboardPage'
 import AlertsPage from './pages/AlertsPage'
+import RecommendationsPage from './pages/RecommendationsPage'
 import SettingsPage from './pages/SettingsPage'
 
 /*
@@ -18,6 +19,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
           <Route path="alerts"   element={<AlertsPage />} />
+          <Route path="recommendations" element={<RecommendationsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

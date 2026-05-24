@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Bell, Settings } from 'lucide-react'
+import { LayoutDashboard, Bell, Lightbulb, Settings } from 'lucide-react'
 
 import { useAlertCounts } from '../hooks/useAlertCounts'
 
 const NAV_ITEMS = [
-  { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/alerts',   label: 'Alerts',    icon: Bell },
-  { to: '/settings', label: 'Settings',  icon: Settings },
+  { to: '/',                label: 'Dashboard',       icon: LayoutDashboard },
+  { to: '/alerts',          label: 'Alerts',          icon: Bell },
+  { to: '/recommendations', label: 'Recommendations', icon: Lightbulb },
+  { to: '/settings',        label: 'Settings',        icon: Settings },
 ]
 
 function Sidebar() {

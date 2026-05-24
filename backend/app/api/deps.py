@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from app.config import settings
 from app.services.aws_cost_service import AwsCostService
+from app.services.resource_scanner import ResourceScanner
 
 
 @lru_cache(maxsize=1)
@@ -24,4 +25,20 @@ def get_aws_service() -> AwsCostService:
     return AwsCostService(
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_resource_scanner() -> ResourceScanner:
+    """
+    FastAPI dependency — returns a singleton ResourceScanner.
+
+    Same singleton pattern as get_aws_service: the boto3 EC2/CloudWatch clients
+    are built once and reused. Unlike Cost Explorer, EC2/CloudWatch are regional,
+    so we pass settings.aws_region.
+    """
+    return ResourceScanner(
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        region=settings.aws_region,
     )
