@@ -56,7 +56,7 @@ const usd = (n) =>
 
 // ── Hero banner ────────────────────────────────────────────────────────────────
 
-function HeroBanner({ summary, isLoading }) {
+function HeroBanner({ summary, isLoading, isError }) {
   return (
     <div className="rounded-xl border border-blue-100 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-6 flex items-center gap-5">
       <div className="shrink-0 p-3 rounded-xl bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400">
@@ -72,7 +72,9 @@ function HeroBanner({ summary, isLoading }) {
           <div className="h-9 w-44 mt-1 bg-blue-100 dark:bg-blue-900/60 rounded animate-pulse" />
         ) : (
           <p className="text-3xl font-bold text-gray-900 dark:text-white leading-tight">
-            {usd(summary?.total_monthly_savings ?? 0)}
+            {/* On a summary fetch error, show a neutral dash — never assert
+                "$0.00" savings when we actually failed to load the number. */}
+            {isError ? '—' : usd(summary?.total_monthly_savings ?? 0)}
             <span className="text-base font-medium text-gray-500 dark:text-gray-400">/month</span>
           </p>
         )}
@@ -80,9 +82,11 @@ function HeroBanner({ summary, isLoading }) {
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           {isLoading
             ? 'Calculating…'
-            : `${summary?.open_count ?? 0} open recommendation${
-                (summary?.open_count ?? 0) === 1 ? '' : 's'
-              }`}
+            : isError
+              ? 'Couldn’t load savings total'
+              : `${summary?.open_count ?? 0} open recommendation${
+                  (summary?.open_count ?? 0) === 1 ? '' : 's'
+                }`}
         </p>
       </div>
     </div>
@@ -114,12 +118,13 @@ function RecommendationCard({ rec, onUpdate, pending }) {
           <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{rec.reason}</p>
         </div>
 
-        {/* Estimated saving — the prominent number */}
+        {/* Estimated saving — the prominent number. The ≈ and "est." make
+            clear this is an approximate figure, not a billed amount. */}
         <div className="shrink-0 text-right">
           <p className="text-xl font-bold text-success leading-tight">
-            {usd(rec.estimated_monthly_usd)}
+            ≈ {usd(rec.estimated_monthly_usd)}
           </p>
-          <p className="text-xs text-gray-400 dark:text-gray-500">/month</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">est. / month</p>
         </div>
       </div>
 
@@ -181,7 +186,7 @@ function RecommendationsPage() {
 
   const { data, isLoading, isError, refetch } = useRecommendations({ resourceType, status })
   const { update, pendingId } = useUpdateRecommendation()
-  const { data: summary, isLoading: summaryLoading } = useRecommendationsSummary()
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useRecommendationsSummary()
   const { scan, scanning } = useScanResources()
 
   const recs = data?.items ?? []
@@ -198,7 +203,13 @@ function RecommendationsPage() {
       </div>
 
       {/* Hero savings banner */}
-      <HeroBanner summary={summary} isLoading={summaryLoading} />
+      <HeroBanner summary={summary} isLoading={summaryLoading} isError={summaryError} />
+
+      {/* Honest-estimate disclaimer — every dollar figure on this page is an
+          approximation, so say so plainly rather than imply false precision. */}
+      <p className="-mt-3 text-xs text-gray-400 dark:text-gray-500">
+        Savings are approximate, estimated from a documented pricing table — verify against current AWS pricing.
+      </p>
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3">
