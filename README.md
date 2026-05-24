@@ -36,6 +36,8 @@ This is a final-year capstone project (BSCS). The goal is a fully functional, se
 │                                                                 │
 │   GET  /health          GET  /costs/daily                       │
 │   GET  /costs/summary   GET  /costs/by-service                  │
+│   GET  /alerts          GET  /alerts/count                      │
+│   PATCH /alerts/{id}    ← acknowledge                           │
 │   POST /admin/sync      ← manual trigger                        │
 │                                                                 │
 │   APScheduler ──► run_sync_job()  every 6 hours                 │
@@ -59,7 +61,7 @@ This is a final-year capstone project (BSCS). The goal is a fully functional, se
                        └───────────────────────────────┘
 ```
 
-**Data flow:** Every 6 hours (or on `POST /admin/sync`) the sync job calls AWS Cost Explorer, upserts the last 7 days into PostgreSQL, then runs anomaly detection on the trailing 21 days — flagging account-level spikes (`scope='total'`) and per-service spikes (`scope='service'`) using a z-score against a 14-day rolling mean. Detected anomalies persist as `alerts` rows. All dashboard reads hit PostgreSQL first — AWS is only called when the database is empty.
+**Data flow:** Every 6 hours (or on `POST /admin/sync`) the sync job calls AWS Cost Explorer, upserts the last 7 days into PostgreSQL, then runs anomaly detection on the trailing 21 days — flagging account-level spikes (`scope='total'`) and per-service spikes (`scope='service'`) using a z-score against a 14-day rolling mean. Detected anomalies persist as `alerts` rows and, when SendGrid is configured, trigger an email notification. The Alerts page lists, filters, and acknowledges them. All dashboard reads hit PostgreSQL first — AWS is only called when the database is empty.
 
 ---
 
@@ -193,6 +195,16 @@ GET /api/v1/costs/summary?days=30
 
 All three read from PostgreSQL first. If the database is empty they fall back to a live AWS call automatically.
 
+### Alerts
+
+```
+GET   /api/v1/alerts?status=new&severity=high&days=30&limit=50&offset=0
+GET   /api/v1/alerts/count?days=30
+PATCH /api/v1/alerts/{id}            ← mark acknowledged
+```
+
+`GET /alerts` lists anomaly alerts newest-first with optional `status` / `severity` filters, a `days` window, and pagination. `GET /alerts/count` returns counts grouped by status and severity over the same window (drives the sidebar badge). `PATCH /alerts/{id}` flips a `new` alert to `acknowledged`.
+
 ### Admin
 
 ```
@@ -219,7 +231,7 @@ venv/bin/python3 -m pytest tests/ -v
 venv/bin/python3 -m pytest --cov=app --cov-report=term-missing tests/
 ```
 
-Current test count: **37 tests** (was 28 in Phase 3, +9 from Phase 4)
+Current test count: **52 tests** (28 in Phase 3, +24 across Phase 4)
 
 | File | What it tests |
 |------|--------------|
@@ -228,7 +240,10 @@ Current test count: **37 tests** (was 28 in Phase 3, +9 from Phase 4)
 | `test_admin_sync.py` | Sync endpoint — 200, correct count, idempotency |
 | `test_aws_cost.py` | `AwsCostService` unit tests — error handling, parsing |
 | `test_anomaly_detector.py` | Pure z-score algorithm — spike, normal, zero variance, severity bands, dollar floor, empty input |
-| `test_cost_sync.py` | End-to-end: seeded baseline + spike → exactly one Alert; second sync is idempotent |
+| `test_cost_sync.py` | End-to-end: seeded baseline + spike → Alert; idempotent re-run; extreme z-score is clamped not overflowed |
+| `test_email_service.py` | SendGrid alert email — payload, HTML escaping, config-missing + failure handling (mocked) |
+| `test_alerts_api.py` | `/alerts` list filters + pagination, `/alerts/count` grouping + days window, `PATCH` acknowledge + 404 |
+| `test_e2e_spike_to_alert.py` | Full pipeline: spike → detection → alert → email sent → visible via API (AWS + SendGrid mocked) |
 
 ---
 
@@ -240,27 +255,29 @@ cloudguard/
 │   ├── dev.sh               # One-command startup (Linux/macOS/WSL)
 │   └── dev.bat              # One-command startup (Windows)
 ├── docs/
+│   ├── anomaly-detection.md # How the z-score detector works, limits, demo script
 │   └── screenshots/         # Dashboard screenshots for the report
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Layout, StatCard, charts, EmptyState, ErrorBoundary
-│   │   ├── hooks/           # useCostSummary, useDailyCosts, useCostsByService, useSync
+│   │   ├── components/      # Layout, StatCard, Sidebar, charts, EmptyState, ErrorBoundary
+│   │   ├── hooks/           # useCostSummary, useDailyCosts, useSync, useAlerts, useAlertCounts, useAcknowledgeAlert
 │   │   ├── lib/             # api.js (all backend calls via axios)
 │   │   └── pages/           # DashboardPage, AlertsPage, SettingsPage
 │   ├── index.html
 │   └── vite.config.js       # Proxy /api → localhost:8000
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/          # Route handlers (health, costs, admin)
+│   │   ├── api/v1/          # Route handlers (health, costs, admin, alerts)
 │   │   ├── db/              # SQLAlchemy engine + session
 │   │   ├── jobs/            # APScheduler background sync + detection
 │   │   ├── models/          # ORM models (AwsAccount, CostRecord, Alert)
 │   │   ├── schemas/         # Pydantic response models
-│   │   ├── services/        # AwsCostService, anomaly_detector
+│   │   ├── services/        # AwsCostService, anomaly_detector, email_service
 │   │   ├── config.py        # Settings loaded from .env
 │   │   └── main.py          # FastAPI app + lifespan
 │   ├── alembic/             # Database migrations
-│   ├── tests/               # Pytest test suite (37 tests)
+│   ├── scripts/             # inject_spike.py — synthetic spike for live demos
+│   ├── tests/               # Pytest test suite (52 tests)
 │   ├── requirements.txt
 │   └── .env                 # Local secrets (gitignored)
 └── docker-compose.yml
@@ -288,11 +305,12 @@ cloudguard/
   - **3.5** Daily costs line chart (7d/30d/90d selector) + service breakdown donut (top 5 + Other)
   - **3.6** Dark mode toggle with FOUC prevention, `sonner` toasts, empty state, React error boundary
   - **3.7** `useSync` mutation, one-command startup scripts (`dev.sh` / `dev.bat`), demo screenshots
-- [ ] **Phase 4** — Anomaly detection *(in progress)*
-  - [x] **4.1** — Pure z-score detection algorithm with severity bands + 7 unit tests
-  - [x] **4.2** — `alerts` database table with `NULLS NOT DISTINCT` unique constraint
-  - [x] **4.3** — Detection wired into sync (total + per-service top 5), idempotent inserts
-  - [ ] **4.4** — Alerts API (`GET /alerts`, `POST /alerts/{id}/acknowledge`)
-  - [ ] **4.5** — SendGrid email notifications
-  - [ ] **4.6** — Alerts UI page (replace placeholder)
+- [x] **Phase 4** — Anomaly detection (52 tests passing)
+  - **4.1** Pure z-score detection algorithm with severity bands + dollar floor + 7 unit tests
+  - **4.2** `alerts` database table with `NULLS NOT DISTINCT` unique constraint (one alert per account/date/scope/service)
+  - **4.3** Detection wired into sync (account total + per-service top 5), idempotent `ON CONFLICT DO NOTHING` inserts
+  - **4.4** SendGrid email notifications — HTML-escaped body, `notified` flag flip on success, non-fatal failures, recency cutoff
+  - **4.5** Alerts API — `GET /alerts` (status/severity filters, days window, pagination), `GET /alerts/count`, `PATCH /alerts/{id}`
+  - **4.6** Alerts UI page — filterable list, severity badges, acknowledge mutation, sidebar new-alert count badge
+  - **4.7** Demo readiness — `inject_spike.py` synthetic-spike injector, end-to-end pipeline test, `docs/anomaly-detection.md`
 - [ ] **Phase 5** — Deployment (Docker, CI/CD)
