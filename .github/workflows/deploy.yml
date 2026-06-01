@@ -1,8 +1,21 @@
 # CloudGuard — Continuous Deployment (OPTIONAL / stretch goal)
 #
-# After CI succeeds on `main`, SSH into the EC2 box, pull the latest code, and
-# rebuild + restart the Docker Compose stack. This is intentionally a separate
-# workflow from ci.yml so deployment only ever runs *after* tests are green.
+# SSH into the EC2 box, pull the latest code, and rebuild + restart the Docker
+# Compose stack.
+#
+# TRIGGER: manual only (`workflow_dispatch`) — run it from the Actions tab via
+# the "Run workflow" button. It is intentionally NOT auto-triggered: until the
+# prerequisites below are met it can only fail at the SSH step, and a recurring
+# red "Deploy" run next to green CI is misleading. Once the box is a git clone
+# and the EC2_* secrets are set, switch this back to an automatic trigger such
+# as:
+#     on:
+#       workflow_run:
+#         workflows: ["CI"]
+#         types: [completed]
+#         branches: [main]
+#   (and re-add `if: github.event.workflow_run.conclusion == 'success'` to the
+#    job so it only deploys after CI passes).
 #
 # ┌─ PREREQUISITES — this will NOT work until all of these are true ───────────┐
 # │ 1. Phase 6 is committed and PUSHED to GitHub (the box pulls from this repo).│
@@ -21,12 +34,9 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: ["CI"]        # must match the `name:` in ci.yml
-    types: [completed]
-    branches: [main]         # only deploy from main
+  workflow_dispatch:        # manual only — "Run workflow" button in the Actions tab
 
-# Never let two deploys run at once; a newer push supersedes an in-flight one.
+# Never let two deploys run at once; a newer run supersedes an in-flight one.
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -35,8 +45,6 @@ jobs:
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
-    # Only deploy if the CI run that triggered us actually passed.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: SSH in, pull, and restart the stack
