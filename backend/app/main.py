@@ -82,9 +82,16 @@ The `rows_upserted` and `duration_seconds` fields in the response confirm the sy
 """,
     contact={
         "name": "Muhammad Azkar",
-        "email": "mgtstore29@gmail.com",
+        "email": "mazkar0107@gmail.com",
     },
     license_info={"name": "MIT"},
+    # Serve the interactive docs UNDER the /api/v1 prefix. In production nginx
+    # only proxies /api/ to the backend, so the default app-root /docs and
+    # /openapi.json would never reach FastAPI. Putting them under /api/v1 makes
+    # Swagger work identically in local dev and behind the reverse proxy.
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc",
+    openapi_url="/api/v1/openapi.json",
     openapi_tags=[
         {
             "name": "health",
