@@ -17,6 +17,66 @@ const api = axios.create({
   baseURL: '/api/v1',
 })
 
+// ── Auth token storage ──────────────────────────────────────────────────────
+// The JWT lives in localStorage so a page refresh keeps you logged in. It's a
+// single source of truth: the request interceptor below reads it, and the
+// AuthContext mirrors it into React state for the UI.
+
+const TOKEN_KEY = 'cloudguard_token'
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY)
+export const setToken = (token) => localStorage.setItem(TOKEN_KEY, token)
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+// Request interceptor — this is the stub from Phase 3.2 finally earning its
+// place. Every outgoing request gets `Authorization: Bearer <token>` attached
+// automatically, so individual API calls never have to think about auth.
+api.interceptors.request.use((config) => {
+  const token = getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Response interceptor — if the server ever rejects us with 401 (expired or
+// invalid token), drop the dead token and bounce to the login screen. We skip
+// this for the /auth/* calls themselves so a wrong password on the login form
+// shows an inline error instead of triggering a redirect loop.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status
+    const url = error.config?.url ?? ''
+    const isAuthCall = url.startsWith('/auth/')
+
+    if (status === 401 && !isAuthCall) {
+      clearToken()
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login')
+      }
+    }
+    return Promise.reject(error)
+  },
+)
+
+// ── Auth endpoints ────────────────────────────────────────────────────────────
+
+// POST /auth/register — create an account, returns the new user
+export function registerRequest(email, password) {
+  return api.post('/auth/register', { email, password }).then((r) => r.data)
+}
+
+// POST /auth/login — exchange credentials for { access_token, token_type }
+export function loginRequest(email, password) {
+  return api.post('/auth/login', { email, password }).then((r) => r.data)
+}
+
+// GET /auth/me — the currently logged-in user (validates a stored token)
+export function fetchMe() {
+  return api.get('/auth/me').then((r) => r.data)
+}
+
 // GET /health — confirm the backend is up
 export function fetchHealth() {
   return api.get('/health').then(r => r.data)
@@ -88,4 +148,41 @@ export function updateRecommendation(id, status) {
 // POST /admin/scan-resources — trigger a live AWS resource scan
 export function triggerResourceScan() {
   return api.post('/admin/scan-resources').then(r => r.data)
+}
+
+// ── Settings: per-user AWS credentials ─────────────────────────────────────────
+// The secret is write-only from the API's side: we send it on save, but GET only
+// ever returns a masked last-4 + region. So the frontend never holds the secret
+// after submitting the form.
+
+// GET /settings/aws-credentials — masked saved credential, or null if none saved
+export function fetchAwsCredentials() {
+  return api.get('/settings/aws-credentials').then(r => r.data)
+}
+
+// POST /settings/aws-credentials — validate (via healthcheck) + encrypt + save
+export function saveAwsCredentials({ accessKeyId, secretAccessKey, region }) {
+  return api
+    .post('/settings/aws-credentials', {
+      access_key_id: accessKeyId,
+      secret_access_key: secretAccessKey,
+      region,
+    })
+    .then(r => r.data)
+}
+
+// DELETE /settings/aws-credentials — remove the saved credential
+export function deleteAwsCredentials() {
+  return api.delete('/settings/aws-credentials').then(r => r.data)
+}
+
+// POST /settings/test-connection — check credentials without saving → {ok, detail}
+export function testAwsConnection({ accessKeyId, secretAccessKey, region }) {
+  return api
+    .post('/settings/test-connection', {
+      access_key_id: accessKeyId,
+      secret_access_key: secretAccessKey,
+      region,
+    })
+    .then(r => r.data)
 }

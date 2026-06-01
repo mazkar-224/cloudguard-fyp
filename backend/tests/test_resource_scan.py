@@ -16,10 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import func, select
 
-from app.api.deps import get_resource_scanner
-from app.db.session import get_db
 from app.jobs.resource_scan import scan_resources
-from app.main import app as fastapi_app
 from app.models.recommendation import Recommendation
 from app.services.resource_scanner import ResourceScanner
 from app.services.savings_estimator import PRICING
@@ -113,15 +110,19 @@ async def test_rescan_is_idempotent_and_updates_in_place(db_session):
 
 @pytest.mark.anyio
 async def test_scan_resources_endpoint(client, db_session):
-    """POST /admin/scan-resources runs the same pipeline and reports counts."""
+    """POST /admin/scan-resources runs the same pipeline and reports counts.
+
+    The route builds its scanner from the logged-in user's saved credentials, so
+    we patch `build_scanner_for_user` to return a fake scanner with canned
+    findings — no real credential row or AWS call needed.
+    """
     findings = [_finding("ebs_volume", "vol-099", {"Size": 50})]
 
-    fastapi_app.dependency_overrides[get_resource_scanner] = lambda: _fake_scanner(findings)
-    try:
-        with patch("app.jobs.resource_scan._fetch_account_id_sync", return_value=ACCOUNT_ID):
-            resp = await client.post("/api/v1/admin/scan-resources")
-    finally:
-        fastapi_app.dependency_overrides.pop(get_resource_scanner, None)
+    with patch(
+        "app.api.v1.admin.build_scanner_for_user",
+        AsyncMock(return_value=_fake_scanner(findings)),
+    ), patch("app.jobs.resource_scan._fetch_account_id_sync", return_value=ACCOUNT_ID):
+        resp = await client.post("/api/v1/admin/scan-resources")
 
     assert resp.status_code == 200
     body = resp.json()

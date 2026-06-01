@@ -1,0 +1,97 @@
+# Production stack for CloudGuard — postgres + backend + frontend + Caddy.
+#
+# Run it:
+#   cp .env.prod.example .env.prod   # then fill in real secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+#
+# All service config comes from .env.prod (never committed). Caddy serves the
+# app on http://localhost in this step; step 6.4 swaps in a domain for HTTPS.
+#
+# A distinct project name keeps this stack (containers, network, volumes) fully
+# isolated from the dev docker-compose.yml, which uses the default project name.
+name: cloudguard-prod
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env.prod
+    volumes:
+      # Named volume → data survives `docker compose down` (removed only by -v).
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ escapes the $ so it's expanded by the container shell using the
+      # POSTGRES_* values injected from .env.prod (not by Compose at parse time).
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cloudguard
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Backend (FastAPI + uvicorn) ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: cloudguard-backend:latest
+    restart: unless-stopped
+    env_file: .env.prod
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - cloudguard
+    # No host port published — the API is reached only through the frontend's
+    # nginx /api proxy, which is in turn fronted by Caddy.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Frontend (static SPA served by nginx, proxies /api → backend) ───────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: cloudguard-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - cloudguard
+
+  # ── Caddy reverse proxy (terminates TLS, auto-renews LE certs) ──────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Caddy reads DOMAIN + ADMIN_EMAIL from .env.prod (see Caddyfile).
+    env_file: .env.prod
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # persisted TLS certificates — keep across restarts
+      - caddy_config:/config
+    networks:
+      - cloudguard
+
+networks:
+  cloudguard:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

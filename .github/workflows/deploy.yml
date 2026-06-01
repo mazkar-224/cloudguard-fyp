@@ -1,0 +1,57 @@
+# CloudGuard — Continuous Deployment (OPTIONAL / stretch goal)
+#
+# After CI succeeds on `main`, SSH into the EC2 box, pull the latest code, and
+# rebuild + restart the Docker Compose stack. This is intentionally a separate
+# workflow from ci.yml so deployment only ever runs *after* tests are green.
+#
+# ┌─ PREREQUISITES — this will NOT work until all of these are true ───────────┐
+# │ 1. Phase 6 is committed and PUSHED to GitHub (the box pulls from this repo).│
+# │ 2. The EC2 box has the repo as a real git clone with `origin` set, NOT the  │
+# │    rsync copy used during the manual deploy. One-time, on the box:          │
+# │       cd ~ && rm -rf cloudguard \                                           │
+# │         && git clone https://github.com/<you>/cloudguard.git \              │
+# │         && cp /path/to/your/.env.prod ~/cloudguard/.env.prod   # keep secrets│
+# │    (.env.prod is gitignored, so it survives pulls and is never in the repo.)│
+# │ 3. The four repository secrets below are configured (see README).           │
+# └─────────────────────────────────────────────────────────────────────────────┘
+#
+# To enable it: push this file. To keep it dormant while you finish other work,
+# leave the prerequisites unmet — the job will simply fail loudly on the SSH
+# step, or you can comment out the `on:` block.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]        # must match the `name:` in ci.yml
+    types: [completed]
+    branches: [main]         # only deploy from main
+
+# Never let two deploys run at once; a newer push supersedes an in-flight one.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    # Only deploy if the CI run that triggered us actually passed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: SSH in, pull, and restart the stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # Where the repo lives on the box. Defaults to $HOME/cloudguard if the
+          # optional EC2_APP_DIR secret isn't set. ($HOME expands inside double
+          # quotes; a literal ~ would not, hence $HOME rather than ~.)
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.EC2_APP_DIR || '$HOME/cloudguard' }}"
+            git pull --ff-only
+            docker compose -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+            docker image prune -f

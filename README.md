@@ -2,6 +2,8 @@
 
 > AWS cost monitoring and anomaly detection — FastAPI · PostgreSQL · React · Tailwind
 
+[![CI](https://github.com/mazkar-224/cloudguard-fyp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mazkar-224/cloudguard-fyp/actions/workflows/ci.yml)
+
 CloudGuard connects to your AWS account and pulls spending data from Cost Explorer every 6 hours. Costs are stored in PostgreSQL and served through a REST API to a React dashboard that shows daily spend trends, per-service breakdowns, and period-over-period comparisons — all in one view.
 
 This is a final-year capstone project (BSCS). The goal is a fully functional, self-hosted alternative to the AWS billing console for teams that want a single dashboard without navigating the AWS UI.
@@ -248,6 +250,73 @@ Current test count: **85 tests** (28 in Phase 3, +24 across Phase 4, +33 across 
 | `test_savings_estimator.py` | Offline savings estimator — per-type pricing math, unknown type → $0, missing size doesn't crash |
 | `test_resource_scan.py` | Scan job — findings become priced recommendations; re-run is idempotent (updates, no duplicates); endpoint counts |
 | `test_recommendations_api.py` | `/recommendations` list filters + dollar-desc sort, summary totals, dismiss/resolve, 404 + 422 |
+
+---
+
+## Continuous integration & deployment
+
+CloudGuard uses **GitHub Actions**. Two workflows live in `.github/workflows/`:
+
+### CI — `ci.yml` (always on)
+
+Runs on **every push and every pull request**. Two jobs run in parallel:
+
+- **Backend** — spins up a throwaway PostgreSQL service container, installs the
+  runtime + test deps, and runs `pytest --cov=app`. The container's credentials
+  match `tests/conftest.py` (`cloudguard` / `cloudguard_test` on port 5433), and
+  AWS is mocked with `moto`, so no real cloud calls or secrets are needed.
+- **Frontend** — `npm ci`, then `npm run lint`, then `npm run build`.
+
+If anything fails the run goes **red ✗**. Enable *Settings → Branches → Branch
+protection* on `main` and mark these checks **required** to block merging broken
+code. The green badge at the top of this README reflects the latest run.
+
+### CD — `deploy.yml` (optional, stretch goal)
+
+After CI **passes on `main`**, this workflow SSHes into the EC2 box, runs
+`git pull`, rebuilds the Compose stack (`docker compose up -d --build`), and
+applies any new migrations. It's deliberately separate so a deploy only happens
+once tests are green.
+
+> ⚠️ **Prerequisites before CD can work:** the code must be committed and pushed
+> to GitHub, and the EC2 box must hold the repo as a **git clone** (with
+> `origin` set) rather than the rsync copy used for the initial manual deploy.
+> `.env.prod` stays on the box (it's gitignored) and survives every pull. Until
+> both are true, leave CD dormant — CI alone already satisfies the requirement.
+
+### Required repository secrets
+
+Add these under **GitHub → Settings → Secrets and variables → Actions → New
+repository secret**. CI needs **none** (it mocks everything); these are only for
+the optional CD workflow:
+
+| Secret | Purpose | Example |
+|--------|---------|---------|
+| `EC2_HOST` | Public IP or hostname of the server | `cloudcostguard-fyp.duckdns.org` |
+| `EC2_USER` | SSH login user | `ubuntu` |
+| `EC2_SSH_KEY` | **Private** key (full PEM contents) for that user | contents of `MYWEBTEST.pem` |
+| `EC2_APP_DIR` | *(optional)* repo path on the box | `~/cloudguard` (the default) |
+
+Never commit these values — they live only in GitHub's encrypted secret store.
+
+### Free-tier minutes
+
+GitHub Actions is **free for public repositories**. (Private repos get a monthly
+allowance — 2,000 minutes on the Free plan — which is still far more than a
+project this size consumes: each CI run is only a few minutes.) Worth a one-line
+mention in the report.
+
+### Adding the status badge
+
+The badge near the top is just Markdown pointing at the workflow's badge SVG:
+
+```markdown
+[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+```
+
+Swap `<owner>/<repo>` for your slug (already set to `mazkar-224/cloudguard-fyp`).
+The image updates automatically after each run — green when tests pass, red when
+they don't.
 
 ---
 

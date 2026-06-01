@@ -4,12 +4,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_aws_service, get_resource_scanner
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.jobs.cost_sync import sync_cost_data
 from app.jobs.resource_scan import scan_resources
-from app.services.aws_cost_service import AwsCostService
-from app.services.resource_scanner import ResourceScanner
+from app.models.user import User
+from app.services.credential_service import (
+    NoCredentialsError,
+    build_cost_service_for_user,
+    build_scanner_for_user,
+)
+from app.services.crypto_service import EncryptionError
+
+# Message shown when a user's stored credentials can't be decrypted — almost
+# always because ENCRYPTION_KEY was changed since they were saved. Re-saving on
+# the Settings page re-encrypts them under the current key.
+_DECRYPT_ERROR_DETAIL = (
+    "Your saved AWS credentials could not be decrypted (the encryption key may "
+    "have changed). Please re-enter them on the Settings page."
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -28,19 +41,29 @@ class ScanResult(BaseModel):
 
 @router.post("/sync", response_model=SyncResult)
 async def manual_sync(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    aws: AwsCostService = Depends(get_aws_service),
 ):
     """
-    Trigger a cost data sync immediately.
+    Trigger a cost data sync immediately, using the LOGGED-IN USER's own AWS
+    credentials (saved on the Settings page, decrypted just-in-time).
 
     Calls the same sync_cost_data() function the scheduler uses — so this is
     a real sync, not a mock. Useful for:
       - Populating the database on first run (scheduler hasn't fired yet)
       - Live demos: hit this, then refresh the dashboard charts
       - Testing that your AWS credentials and permissions work
+
+    Returns 400 if the user hasn't saved credentials yet.
     """
     start = time.perf_counter()
+
+    try:
+        aws = await build_cost_service_for_user(db, current_user.id)
+    except NoCredentialsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except EncryptionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DECRYPT_ERROR_DETAIL) from exc
 
     try:
         summary = await sync_cost_data(db, aws)
@@ -60,18 +83,28 @@ async def manual_sync(
 
 @router.post("/scan-resources", response_model=ScanResult)
 async def manual_scan_resources(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    scanner: ResourceScanner = Depends(get_resource_scanner),
 ):
     """
-    Trigger a resource scan immediately.
+    Trigger a resource scan immediately, using the LOGGED-IN USER's own AWS
+    credentials (saved on the Settings page, decrypted just-in-time).
 
     Calls the same scan_resources() function the daily scheduler uses — runs
     every waste check, prices the findings, and upserts recommendations.
     Re-running is safe: existing recommendations are updated (last_seen_at
     bumped), never duplicated. Handy for live demos and first-run population.
+
+    Returns 400 if the user hasn't saved credentials yet.
     """
     start = time.perf_counter()
+
+    try:
+        scanner = await build_scanner_for_user(db, current_user.id)
+    except NoCredentialsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except EncryptionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DECRYPT_ERROR_DETAIL) from exc
 
     try:
         summary = await scan_resources(db, scanner)

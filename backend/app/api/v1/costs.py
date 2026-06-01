@@ -4,11 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_aws_service
+from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.cost import CostRecord
+from app.models.user import User
 from app.schemas.cost import CostSummary, DailyCostItem, ServiceCostItem
-from app.services.aws_cost_service import AwsCostService
+from app.services.credential_service import (
+    NoCredentialsError,
+    build_cost_service_for_user,
+)
+from app.services.crypto_service import EncryptionError
 
 router = APIRouter(prefix="/costs", tags=["costs"])
 
@@ -17,10 +22,22 @@ def _to_http_error(exc: Exception) -> HTTPException:
     """
     Convert exceptions from AwsCostService into FastAPI HTTP responses.
 
-    PermissionError → 403  (wrong IAM permissions or Cost Explorer not enabled)
-    ValueError      → 400  (bad credentials)
-    anything else   → 502  (unexpected AWS error — our fault to investigate)
+    NoCredentialsError → 400  (user hasn't saved AWS credentials yet)
+    EncryptionError    → 400  (stored creds can't be decrypted — key changed)
+    PermissionError    → 403  (wrong IAM permissions or Cost Explorer not enabled)
+    ValueError         → 400  (bad credentials)
+    anything else      → 502  (unexpected AWS error — our fault to investigate)
     """
+    if isinstance(exc, NoCredentialsError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if isinstance(exc, EncryptionError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Your saved AWS credentials could not be decrypted (the encryption "
+                "key may have changed). Please re-enter them on the Settings page."
+            ),
+        )
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, ValueError):
@@ -34,7 +51,7 @@ def _to_http_error(exc: Exception) -> HTTPException:
 async def get_daily_costs(
     days: int = Query(default=30, ge=1, le=365, description="How many past days to include"),
     db: AsyncSession = Depends(get_db),
-    aws: AwsCostService = Depends(get_aws_service),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Daily AWS costs broken down by service for the last N days.
@@ -42,8 +59,8 @@ async def get_daily_costs(
     Response shape:
         [{"date": "2026-05-08", "service": "Amazon EC2", "cost": 18.50}, ...]
 
-    The database is checked first. If it has no records for the period,
-    we call AWS directly and return live data.
+    The database is checked first. If it has no records for the period, we call
+    AWS directly using the current user's saved credentials and return live data.
     """
     end = date.today()
     start = end - timedelta(days=days)
@@ -66,8 +83,9 @@ async def get_daily_costs(
             for r in records
         ]
 
-    # ── Fallback: live AWS call ───────────────────────────────────────────────
+    # ── Fallback: live AWS call (current user's credentials) ──────────────────
     try:
+        aws = await build_cost_service_for_user(db, current_user.id)
         live = await aws.get_daily_costs(days=days)
     except Exception as exc:
         raise _to_http_error(exc) from exc
@@ -85,7 +103,7 @@ async def get_cost_by_service(
     start_date: date = Query(..., description="Start date inclusive, e.g. 2026-05-01"),
     end_date: date = Query(..., description="End date exclusive, e.g. 2026-05-31"),
     db: AsyncSession = Depends(get_db),
-    aws: AwsCostService = Depends(get_aws_service),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Total cost per service across a date range, sorted most expensive first.
@@ -121,8 +139,9 @@ async def get_cost_by_service(
             for r in rows
         ]
 
-    # ── Fallback: live AWS call ───────────────────────────────────────────────
+    # ── Fallback: live AWS call (current user's credentials) ──────────────────
     try:
+        aws = await build_cost_service_for_user(db, current_user.id)
         live = await aws.get_cost_by_service(start_date=start_date, end_date=end_date)
     except Exception as exc:
         raise _to_http_error(exc) from exc
@@ -136,7 +155,7 @@ async def get_cost_by_service(
 async def get_cost_summary(
     days: int = Query(default=30, ge=1, le=365, description="How many past days to summarise"),
     db: AsyncSession = Depends(get_db),
-    aws: AwsCostService = Depends(get_aws_service),
+    current_user: User = Depends(get_current_user),
 ):
     """
     High-level cost summary for the last N days.
@@ -191,8 +210,9 @@ async def get_cost_summary(
             source="database",
         )
 
-    # ── Fallback: live AWS call ───────────────────────────────────────────────
+    # ── Fallback: live AWS call (current user's credentials) ──────────────────
     try:
+        aws = await build_cost_service_for_user(db, current_user.id)
         live = await aws.get_daily_costs(days=days)
     except Exception as exc:
         raise _to_http_error(exc) from exc

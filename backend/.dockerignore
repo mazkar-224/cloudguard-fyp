@@ -1,0 +1,34 @@
+# Keep the build context (and final image) lean — exclude anything not needed
+# to run the API in production.
+
+# Virtualenv / Python caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — NEVER bake into an image
+.env
+.env.*
+!.env.example
+
+# Tests & dev-only tooling (image installs requirements.txt, not dev deps)
+tests/
+requirements-dev.txt
+debug_aws.py
+pytest.ini
+
+# Coverage / build artifacts
+.coverage
+htmlcov/
+*.egg-info/
+
+# VCS / editor noise
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store

@@ -4,5 +4,14 @@
 from app.models.cost import AwsAccount, CostRecord
 from app.models.alert import Alert
 from app.models.recommendation import Recommendation
+from app.models.user import User
+from app.models.aws_credential import AwsCredential
 
-__all__ = ["AwsAccount", "CostRecord", "Alert", "Recommendation"]
+__all__ = [
+    "AwsAccount",
+    "CostRecord",
+    "Alert",
+    "Recommendation",
+    "User",
+    "AwsCredential",
+]

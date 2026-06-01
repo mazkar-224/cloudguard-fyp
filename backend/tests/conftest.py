@@ -25,10 +25,18 @@ from sqlalchemy import text
 # FastAPI instance, so we use `from app import models` instead.
 from app.main import app as fastapi_app
 from app.db.session import get_db
-from app.api.deps import get_aws_service
+from app.api.deps import get_aws_service, get_current_user
 from app.db.base import Base
+from app.models.user import User
 from app.services.aws_cost_service import AwsCostService
 from app import models as _register_models  # noqa: F401 — registers all tables with Base.metadata
+
+# Every cost/alert/recommendation/admin route now sits behind get_current_user.
+# The vast majority of existing tests don't care *who* is logged in — they just
+# need to be past the auth gate — so we override the dependency with a fixed
+# fake user. Tests that exercise auth itself use `unauth_client`, which leaves
+# the real get_current_user in place.
+_FAKE_USER = User(id=1, email="tester@cloudguard.dev", hashed_password="x")
 
 # ── Restrict anyio to asyncio only (default also tests trio, doubling runs) ──
 
@@ -48,6 +56,24 @@ def _clear_sendgrid_settings(monkeypatch):
     monkeypatch.setattr("app.config.settings.sendgrid_api_key", "")
     monkeypatch.setattr("app.config.settings.alert_sender_email", "")
     monkeypatch.setattr("app.config.settings.alert_recipient_email", "")
+
+
+# ── Encryption key for crypto_service ─────────────────────────────────────────
+# The Settings/credentials tests encrypt and decrypt with Fernet. We pin a fixed
+# valid test key (NOT the production one) and clear the cipher's lru_cache before
+# and after each test so the key always takes effect and never leaks between runs.
+
+_TEST_ENCRYPTION_KEY = "sUajX9OvLLfJYBPgXxw6gxAT2drCVRGD5pPszjyW5PI="
+
+
+@pytest.fixture(autouse=True)
+def _set_encryption_key(monkeypatch):
+    from app.services import crypto_service
+
+    monkeypatch.setattr("app.config.settings.encryption_key", _TEST_ENCRYPTION_KEY)
+    crypto_service._get_fernet.cache_clear()
+    yield
+    crypto_service._get_fernet.cache_clear()
 
 
 # ── Test database ─────────────────────────────────────────────────────────────
@@ -107,8 +133,8 @@ def reset_tables():
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "TRUNCATE TABLE recommendations, cost_records, aws_accounts"
-                    " RESTART IDENTITY CASCADE"
+                    "TRUNCATE TABLE aws_credentials, users, recommendations,"
+                    " cost_records, aws_accounts RESTART IDENTITY CASCADE"
                 )
             )
         await engine.dispose()
@@ -157,6 +183,43 @@ async def client(db_session: AsyncSession) -> AsyncClient:
 
     fastapi_app.dependency_overrides[get_db] = _override_db
     fastapi_app.dependency_overrides[get_aws_service] = lambda: _no_aws
+    # Sail past the auth gate as a fixed fake user — these tests aren't about login.
+    fastapi_app.dependency_overrides[get_current_user] = lambda: _FAKE_USER
+
+    async with AsyncClient(
+        transport=ASGITransport(app=fastapi_app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
+
+    fastapi_app.dependency_overrides.pop(get_db, None)
+    fastapi_app.dependency_overrides.pop(get_aws_service, None)
+    fastapi_app.dependency_overrides.pop(get_current_user, None)
+
+
+# ── Client WITHOUT the auth override — for testing auth itself ────────────────
+
+@pytest.fixture
+async def unauth_client(db_session: AsyncSession) -> AsyncClient:
+    """
+    Like `client` but leaves the real get_current_user in place, so protected
+    endpoints genuinely require a valid Bearer token.
+
+    Used by the auth tests to prove registration/login work end-to-end and that
+    protected routes reject anonymous requests. get_db still points at the test
+    DB (so registered users persist for the login + token checks), and the AWS
+    service is stubbed to fail loudly if a fallback path is ever hit.
+    """
+    async def _override_db():
+        yield db_session
+
+    _no_aws = MagicMock(spec=AwsCostService)
+    _no_aws.get_daily_costs = AsyncMock(
+        side_effect=AssertionError("AWS should not be called in auth tests")
+    )
+
+    fastapi_app.dependency_overrides[get_db] = _override_db
+    fastapi_app.dependency_overrides[get_aws_service] = lambda: _no_aws
 
     async with AsyncClient(
         transport=ASGITransport(app=fastapi_app),
@@ -197,9 +260,13 @@ async def sync_client(
     """
     Client for admin sync tests.
 
-    Two dependency overrides:
-      1. get_db           → test DB session
-      2. get_aws_service  → mock that returns MOCK_COST_ROWS
+    Overrides:
+      1. get_db            → test DB session
+      2. get_current_user  → fixed fake user (past the auth gate)
+
+    The admin /sync route builds its AwsCostService from the logged-in user's
+    saved credentials, so we patch `build_cost_service_for_user` to hand back
+    the mock that returns MOCK_COST_ROWS — no real credential row or AWS needed.
 
     _fetch_account_id_sync is also patched directly because asyncio.to_thread()
     runs it in a worker thread where moto's thread-local mock context is not
@@ -209,9 +276,12 @@ async def sync_client(
         yield db_session
 
     fastapi_app.dependency_overrides[get_db] = _override_db
-    fastapi_app.dependency_overrides[get_aws_service] = lambda: mock_aws_service
+    fastapi_app.dependency_overrides[get_current_user] = lambda: _FAKE_USER
 
     with patch(
+        "app.api.v1.admin.build_cost_service_for_user",
+        AsyncMock(return_value=mock_aws_service),
+    ), patch(
         "app.jobs.cost_sync._fetch_account_id_sync",
         return_value="123456789012",
     ):
@@ -222,7 +292,7 @@ async def sync_client(
             yield ac
 
     fastapi_app.dependency_overrides.pop(get_db, None)
-    fastapi_app.dependency_overrides.pop(get_aws_service, None)
+    fastapi_app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Legacy fixture — kept for the unit tests in test_aws_cost.py ──────────────

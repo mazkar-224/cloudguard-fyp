@@ -1,0 +1,108 @@
+# CloudGuard — Continuous Integration
+#
+# Runs on every push and every pull request. Two independent jobs:
+#   • backend  — spins up a throwaway PostgreSQL, installs deps, runs pytest + coverage
+#   • frontend — installs deps with `npm ci`, lints, and builds
+#
+# If either job fails the whole workflow fails (red ✗), which blocks merges when
+# branch protection requires these checks. A green run means every test passed
+# and the SPA built cleanly before the code ever reaches the live site.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Backend: pytest against a real PostgreSQL service container.
+  # ───────────────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend tests (pytest + coverage)
+    runs-on: ubuntu-latest
+
+    # GitHub spins this container up alongside the job and tears it down after.
+    # The credentials/db name MUST match tests/conftest.py's hard-coded
+    # TEST_DB_URL (cloudguard / cloudguard_dev / cloudguard_test), and we map the
+    # container's 5432 to the host's 5433 because that's the port conftest dials.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cloudguard
+          POSTGRES_PASSWORD: cloudguard_dev
+          POSTGRES_DB: cloudguard_test
+        ports:
+          - 5433:5432
+        # Don't start running tests until Postgres reports healthy, otherwise the
+        # first connection races the database boot and the run flakes.
+        options: >-
+          --health-cmd "pg_isready -U cloudguard"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies (runtime + test)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        # These are dummy values just so Settings() can construct on import.
+        # conftest.py mocks AWS (moto) and injects its own encryption key, so no
+        # real cloud calls or production secrets are ever needed in CI.
+        env:
+          DATABASE_URL: postgresql://cloudguard:cloudguard_dev@localhost:5433/cloudguard_test
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_REGION: us-east-1
+          SECRET_KEY: ci-not-a-real-secret
+        run: pytest --cov=app --cov-report=term-missing
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Frontend: install, lint, build.
+  # ───────────────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend lint + build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` is the CI-grade install: it installs exactly what package-lock
+      # pins (reproducible) and fails if package.json and the lockfile disagree.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

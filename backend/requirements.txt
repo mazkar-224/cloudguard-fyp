@@ -11,9 +11,14 @@ rich==13.9.4
 apscheduler==3.10.4
 sendgrid==6.12.5
 
-# --- Test dependencies ---
-pytest==8.3.5
-anyio==4.13.0
-moto==5.0.24
-httpx==0.27.2
-pytest-cov==6.0.0
+# --- Auth (Phase 6.1) ---
+bcrypt==5.0.0                  # password hashing (used directly, not via passlib)
+PyJWT==2.10.1                  # JWT sign/verify (maintained; no datetime.utcnow deprecation)
+email-validator==2.2.0         # enables pydantic EmailStr
+
+# --- Encryption (Phase 6.2) ---
+cryptography==48.0.0           # Fernet — encrypts users' AWS secrets at rest
+
+# Test/dev-only dependencies live in requirements-dev.txt so the production
+# Docker image installs runtime deps only. For local dev + tests run:
+#   pip install -r requirements-dev.txt

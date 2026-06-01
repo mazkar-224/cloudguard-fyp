@@ -1,0 +1,34 @@
+# CloudGuard reverse proxy.
+#
+# The hostname comes from the DOMAIN environment variable in .env.prod:
+#   - DOMAIN=localhost      → Caddy serves plain HTTP on :80 (local dev).
+#   - DOMAIN=app.example.com → Caddy obtains a Let's Encrypt cert automatically
+#                              and serves HTTPS on :443 (production).
+#
+# Let's Encrypt cannot issue a certificate for a bare IP address, so for live
+# HTTPS you must point a real hostname (or a free DNS service like DuckDNS) at
+# this server first. See docs/deploy.md for the full walkthrough.
+#
+# ADMIN_EMAIL is sent to Let's Encrypt for cert-expiry notifications. Falls back
+# to a safe placeholder if you leave it blank.
+
+{
+	email {$ADMIN_EMAIL:admin@example.com}
+}
+
+{$DOMAIN:localhost} {
+	reverse_proxy frontend:80
+	encode gzip
+
+	# Security headers. HSTS tells browsers to only ever use HTTPS for this
+	# host. Caddy only emits it when actually serving over TLS, so it's inert
+	# for the local DOMAIN=localhost (plain HTTP) case.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Don't advertise the upstream server software.
+		-Server
+	}
+}
